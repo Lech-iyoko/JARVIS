@@ -2,82 +2,136 @@
 import os
 import sounddevice as sd
 import numpy as np
-import websockets
-import json
-import asyncio
+import time
 from dotenv import load_dotenv
+from deepgram import (
+    DeepgramClient,
+    DeepgramClientOptions,
+    LiveTranscriptionEvents,
+    LiveOptions,
+)
 
 # Load environment variables from .env file
 load_dotenv()
 
 DEEPGRAM_API_KEY = os.getenv("DEEPGRAM_API_KEY")
-DG_URL = "wss://api.deepgram.com/v1/listen?model=nova-3&smart_format=true"
 
-# Print available devices and let user select
+# --- New, Robust Device Selection ---
 print("Available audio devices:")
 devices = sd.query_devices()
+input_devices = [] # This will store tuples of (index, name)
+
 for i, device in enumerate(devices):
-    if device['max_input_channels'] > 0:  # Only show input devices
-        print(f"  {i}: {device['name']} ({device['hostapi']})")
+    # Only show input devices
+    if device['max_input_channels'] > 0:
+        print(f"  {i}: {device['name']}")
+        input_devices.append((i, device['name'])) # Store the valid index and name
 
-# Select microphone device (you can change this number based on your output)
-MICROPHONE_DEVICE = 7  # Headset Microphone (2- Wireless Controller), Windows DirectSound
-print(f"Using device {MICROPHONE_DEVICE}: {devices[MICROPHONE_DEVICE]['name']}")
+if not input_devices:
+    print("No input devices found!")
+    exit(1)
 
-# Async queue to buffer audio chunks
-audio_queue = asyncio.Queue()
+# Auto-select the best microphone device
+preferred_devices = [2, 10, 1, 9, 8]  # Headset microphones first, then others
+MICROPHONE_DEVICE = None
 
-# Callback function for InputStream
-def audio_callback(indata, frames, time, status):
-    if status:
-        print("Audio status:", status)
-    # Convert float32 to int16 and put in queue
-    audio_data = (indata * 32767).astype(np.int16)
-    audio_queue.put_nowait(audio_data.copy())
+for device_id in preferred_devices:
+    if device_id < len(devices) and devices[device_id]['max_input_channels'] > 0:
+        MICROPHONE_DEVICE = device_id
+        print(f"Auto-selected device {device_id}: {devices[device_id]['name']}")
+        break
 
-# Main function to handle both streaming and receiving
-async def main():
+if MICROPHONE_DEVICE is None:
+    # Fallback to first available input device
+    MICROPHONE_DEVICE = input_devices[0][0]
+    print(f"Fallback to device {MICROPHONE_DEVICE}: {devices[MICROPHONE_DEVICE]['name']}")
+
+print(f"Using device {MICROPHONE_DEVICE}: {devices[MICROPHONE_DEVICE]['name']}\n")
+
+
+# Global variable to signal the mic stream to stop
+mic_stream_active = True
+
+def main():
+    global mic_stream_active
     try:
-        async with websockets.connect(DG_URL, additional_headers={"Authorization": f"Token {DEEPGRAM_API_KEY}"}) as ws:
-            print("Connected to Deepgram")
-            
-            # Start audio stream with selected device
-            with sd.InputStream(
-                device=MICROPHONE_DEVICE,
-                samplerate=16000, 
-                channels=1, 
-                dtype='float32', 
-                callback=audio_callback,
-                blocksize=1024
-            ):
-                print("Mic stream started")
-                
-                # Create tasks for sending audio and receiving transcripts
-                async def send_audio():
-                    while True:
-                        try:
-                            chunk = await asyncio.wait_for(audio_queue.get(), timeout=1.0)
-                            await ws.send(chunk.tobytes())
-                        except asyncio.TimeoutError:
-                            # Send keepalive message if no audio for 1 second
-                            await ws.send(json.dumps({"type": "KeepAlive"}))
-                
-                async def receive_transcripts():
-                    async for message in ws:
-                        try:
-                            data = json.loads(message)
-                            if 'channel' in data:
-                                transcript = data.get("channel", {}).get("alternatives", [{}])[0].get("transcript", "")
-                                if transcript.strip():
-                                    print("Transcript:", transcript)
-                        except json.JSONDecodeError:
-                            print("Received non-JSON message:", message)
-                
-                # Run both tasks concurrently
-                await asyncio.gather(send_audio(), receive_transcripts())
-                
-    except Exception as e:
-        print(f"Error: {e}")
-        print("Make sure your microphone is working and the device number is correct.")
+        # 1. Initialize the Deepgram Client
+        config = DeepgramClientOptions(options={"keepalive": "true"})
+        deepgram = DeepgramClient(DEEPGRAM_API_KEY, config)
 
-asyncio.run(main())
+        # 2. Create a LiveTranscriptionClient
+        dg_connection = deepgram.listen.live.v("1")
+
+        # 3. Define event handlers
+        def on_open(self, open, **kwargs):
+            print("Connected to Deepgram")
+
+        def on_message(self, result, **kwargs):
+            transcript = result.channel.alternatives[0].transcript
+            if len(transcript) > 0:
+                print(f"Transcript: {transcript}")
+
+        def on_error(self, error, **kwargs):
+            print(f"Error: {error}")
+
+        def on_close(self, close, **kwargs):
+            print("\nConnection closed")
+            global mic_stream_active
+            mic_stream_active = False # Signal mic to stop
+
+        # 4. Register the event handlers
+        dg_connection.on(LiveTranscriptionEvents.Open, on_open)
+        dg_connection.on(LiveTranscriptionEvents.Transcript, on_message)
+        dg_connection.on(LiveTranscriptionEvents.Error, on_error)
+        dg_connection.on(LiveTranscriptionEvents.Close, on_close)
+
+        # 5. Define options and start the connection
+        options = LiveOptions(
+            model="nova-2",
+            language="en-US",
+            smart_format=True,
+            sample_rate=16000,
+            encoding="linear16"
+        )
+        if not dg_connection.start(options):
+            print("Failed to connect to Deepgram")
+            return
+
+        # 6. Define the audio callback (with Volume Test)
+        def audio_callback(indata, frames, time, status):
+            if status:
+                print("Audio status:", status)
+            
+            # --- DEBUGGING STEP: Check audio volume ---
+            volume_norm = np.linalg.norm(indata)
+            print(f"Volume: {volume_norm:.2f}", end="\r") # Use carriage return
+            # --- END DEBUGGING STEP ---
+            
+            if mic_stream_active:
+                dg_connection.send(indata.tobytes())
+
+        # 7. Start the microphone stream
+        print("Starting microphone stream... press Ctrl+C to stop.\n")
+        with sd.InputStream(
+            device=MICROPHONE_DEVICE,
+            samplerate=16000,
+            channels=1,
+            dtype='int16',
+            callback=audio_callback,
+            blocksize=1024
+        ):
+            while mic_stream_active:
+                time.sleep(0.1)
+
+        # 8. Finish the Deepgram connection
+        dg_connection.finish()
+        print("Finished.")
+
+    except KeyboardInterrupt:
+        print("\nStopping stream...")
+        mic_stream_active = False
+    except Exception as e:
+        print(f"An error occurred: {e}")
+
+if __name__ == "__main__":
+    main()
