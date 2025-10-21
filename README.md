@@ -1,4 +1,4 @@
-# JARVIS-CV Beta: A Visually-Grounded Voice Assistant
+# VISION: A Visually-Grounded Voice Assistant
 
 [![Project Status: In Development](https://img.shields.io/badge/status-in_development-yellowgreen.svg)](https://shields.io/)
 [![Python Version](https://img.shields.io/badge/python-3.10+-blue.svg)](https://shields.io/)
@@ -16,7 +16,7 @@ A portfolio project exploring how predictive world models can power a new genera
 
 Today's AI assistants are powerful, but fundamentally "blind." They react to commands and analyse static snapshots of the world. This project explores a different paradigm: **predictive understanding**.
 
-JARVIS-CV is an experiment to test the hypothesis that by using a predictive world model like Meta's **V-JEPA**, we can create an assistant that learns the underlying dynamics of its environment. Instead of just describing *what is*, it builds an internal model to anticipate *what's next*. This is a step towards an AI co-pilot that offers truly contextual, proactive assistance.
+VISION is an experiment to test the hypothesis that by using a predictive world model like Meta's **V-JEPA**, we can create an assistant that learns the underlying dynamics of its environment. Instead of just describing *what is*, it builds an internal model to anticipate *what's next*. This is a step towards an AI co-pilot that offers truly contextual, proactive assistance.
 
 *For a deeper dive into the philosophy behind this project, read my Substack post: [Link to your Substack post here]*
 
@@ -59,7 +59,7 @@ Follow these instructions to get a local copy up and running for development and
 
 1.  **Clone the repository:**
     ```bash
-    git clone [https://github.com/your-username/jarvis-cv-beta.git](https://github.com/your-username/jarvis-cv-beta.git)
+    git clone [https://github.com/your-username/jarvis-cv-beta.git](https://github.com/your-username/jarvis-cv-bet.git)
     cd jarvis-cv-beta
     ```
 
