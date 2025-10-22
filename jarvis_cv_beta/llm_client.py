@@ -17,11 +17,9 @@ class GroqClient:
         if not api_key:
             raise EnvironmentError("GROQ_API_KEY not found in .env file.")
 
-        # --- THESE ARE THE MISSING LINES ---
         self.client = Groq(api_key=api_key)
-        self.model = "llama3-8b-8192"
+        self.model = "llama-3.1-8b-instant"
         print("✅ Groq Client initialized.")
-        # --- END OF FIX ---
 
     def generate_response(self, prompt_text):
         """
